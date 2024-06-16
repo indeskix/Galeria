@@ -1,4 +1,4 @@
-# gallery_app
+# gallery_Alexa_app
 
 Simple gallery app for android build Flutter
 
