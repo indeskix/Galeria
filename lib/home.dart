@@ -74,7 +74,7 @@ class Product extends StatelessWidget {
                   },
                   child: Image.asset(
                     product_image,
-                    fit: BoxFit.cover, // Obrazek wypełnia cały kafelek
+                    fit: BoxFit.cover,
                   ),
                 ),
               ),
