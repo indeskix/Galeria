@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'database_helper.dart';
 
 class LoginPage extends StatefulWidget {
   @override
@@ -7,85 +8,41 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
-  final TextEditingController _usernameController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
-  bool _isLoginMode = true;
+  final _usernameController = TextEditingController();
+  final _passwordController = TextEditingController();
 
-  Future<void> _authenticate() async {
-    final prefs = await SharedPreferences.getInstance();
-    final username = _usernameController.text.trim();
+  Future<void> _authenticate(bool isLogin) async {
+    final db = DatabaseHelper.instance;
+    final username = _usernameController.text;
     final password = _passwordController.text;
 
-    if (_isLoginMode) {
-      // Login mode
-      final storedPassword = prefs.getString(username);
-      if (storedPassword == password) {
-        // Return the actual username so main.dart can store favorites separately
-        Navigator.pop(context, username);
+    if (isLogin) {
+      final user = await db.getUser(username, password);
+      if (user != null) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setInt('loggedInUserId', user['id']);
+
+        Navigator.pop(context, user['id']);
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Invalid username or password')),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Invalid credentials')));
       }
     } else {
-      // Register mode
-      if (username.isNotEmpty && password.isNotEmpty) {
-        // Save new account in SharedPreferences
-        prefs.setString(username, password);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Account created successfully!')),
-        );
-        // Switch back to login mode
-        setState(() {
-          _isLoginMode = true;
-        });
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Please enter a username and password')),
-        );
-      }
+      await db.insertUser(username, password);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Account created')));
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(_isLoginMode ? 'Login' : 'Register'),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            TextField(
-              controller: _usernameController,
-              decoration: InputDecoration(labelText: 'Username'),
-            ),
-            TextField(
-              controller: _passwordController,
-              decoration: InputDecoration(labelText: 'Password'),
-              obscureText: true,
-            ),
-            SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: _authenticate,
-              child: Text(_isLoginMode ? 'Login' : 'Register'),
-            ),
-            TextButton(
-              onPressed: () {
-                setState(() {
-                  _isLoginMode = !_isLoginMode;
-                });
-              },
-              child: Text(
-                _isLoginMode
-                    ? 'Don’t have an account? Register here'
-                    : 'Already have an account? Login here',
-              ),
-            ),
-          ],
-        ),
+      appBar: AppBar(title: Text("Login")),
+      body: Column(
+        children: [
+          TextField(controller: _usernameController, decoration: InputDecoration(labelText: "Username")),
+          TextField(controller: _passwordController, decoration: InputDecoration(labelText: "Password"), obscureText: true),
+          ElevatedButton(onPressed: () => _authenticate(true), child: Text("Login")),
+          ElevatedButton(onPressed: () => _authenticate(false), child: Text("Register")),
+        ],
       ),
     );
   }

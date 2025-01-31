@@ -1,21 +1,38 @@
 import 'package:flutter/material.dart';
-import 'package:gallery_app/home.dart';
-import 'package:gallery_app/login_page.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
+import 'database_helper.dart';
+import 'home.dart';
+import 'login_page.dart';
+import 'profile_page.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-void main() => runApp(MyApp());
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
+    systemNavigationBarColor: Colors.black,
+    statusBarColor: Colors.black,
+  ));
+
+  runApp(MyApp());
+}
 
 class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      // For older Flutter versions, 'accentColor' is fine
-      theme: ThemeData(
-        primaryColor: Colors.purple,
-        accentColor: Colors.amber,
-      ),
       debugShowCheckedModeBanner: false,
+      theme: ThemeData.dark().copyWith(
+        primaryColor: Colors.black,
+        scaffoldBackgroundColor: Colors.black,
+        appBarTheme: AppBarTheme(backgroundColor: Colors.black),
+        bottomNavigationBarTheme: BottomNavigationBarThemeData(
+          backgroundColor: Colors.black,
+          selectedItemColor: Colors.amber[800],
+          unselectedItemColor: Colors.white,
+        ),
+      ),
       home: GalleryApp(),
     );
   }
@@ -28,112 +45,107 @@ class GalleryApp extends StatefulWidget {
 
 class _GalleryAppState extends State<GalleryApp> {
   int _selectedIndex = 0;
-  bool _isLoggedIn = false;
-  String _loggedInUsername = "";
-
-  // Pre-generate a list of booleans for Favorites.
-  List<bool> favorites = List.generate(14, (index) => false);
-
-  final List<Map<String, String>> List_Item = [
-    {'pic': 'assets/img/1.jpg'},
-    {'pic': 'assets/img/2.jpg'},
-    {'pic': 'assets/img/3.jpg'},
-    {'pic': 'assets/img/4.jpg'},
-    {'pic': 'assets/img/5.jpg'},
-    {'pic': 'assets/img/6.jpg'},
-    {'pic': 'assets/img/7.jpg'},
-    {'pic': 'assets/img/8.jpg'},
-    {'pic': 'assets/img/9.jpg'},
-    {'pic': 'assets/img/10.jpg'},
-    {'pic': 'assets/img/11.jpg'},
-    {'pic': 'assets/img/12.jpg'},
-    {'pic': 'assets/img/13.jpg'},
-    {'pic': 'assets/img/14.jpg'},
-  ];
+  int _userId;
+  List<int> favorites = [];
+  List<Map<String, dynamic>> images = [];
 
   @override
   void initState() {
     super.initState();
-    _checkLoginStatus();
+    _initializeApp();
+  }
+
+  Future<void> _initializeApp() async {
+    final db = DatabaseHelper.instance;
+    await db.insertLocalImages();
+    await _checkLoginStatus();
   }
 
   Future<void> _checkLoginStatus() async {
     final prefs = await SharedPreferences.getInstance();
-    final loggedIn = prefs.getBool('loggedIn') ?? false;
-    final username = prefs.getString('loggedInUser') ?? "";
+    final userId = prefs.getInt('loggedInUserId');
 
-    setState(() {
-      _isLoggedIn = loggedIn;
-      _loggedInUsername = username;
-    });
-
-    if (!loggedIn) {
-      // If not logged in, go straight to login
+    if (userId == null) {
       await _navigateToLogin();
     } else {
-      // If already logged in, load that user's favorites
-      final userFavorites = prefs.getStringList('favorites_' + _loggedInUsername) ?? [];
       setState(() {
-        favorites = _generateFavorites(userFavorites);
+        _userId = userId;
       });
+      await _loadImages();
+      await _loadFavorites();
     }
   }
 
   Future<void> _navigateToLogin() async {
-    final result = await Navigator.push(
+    final userId = await Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => LoginPage()),
     );
 
-    if (result != null) {
-      // 'result' is the username from LoginPage
-      final prefs = await SharedPreferences.getInstance();
+    if (userId != null) {
       setState(() {
-        _isLoggedIn = true;
-        _loggedInUsername = result;
-        // Optionally reset tab to Gallery so the bar refreshes
-        _selectedIndex = 0;
+        _userId = userId;
       });
-      prefs.setBool('loggedIn', true);
-      prefs.setString('loggedInUser', _loggedInUsername);
-
-      // Load favorites for that user
-      final userFavorites = prefs.getStringList('favorites_' + _loggedInUsername) ?? [];
-      setState(() {
-        favorites = _generateFavorites(userFavorites);
-      });
+      await _loadImages();
+      await _loadFavorites();
     } else {
-      // If user backs out without logging in, close app
       SystemNavigator.pop();
     }
   }
 
+  Future<void> _loadImages() async {
+    final db = DatabaseHelper.instance;
+    final imageList = await db.getImages();
+    setState(() {
+      images = imageList;
+    });
+  }
+
+  Future<void> _loadFavorites() async {
+    final db = DatabaseHelper.instance;
+    final favList = await db.getFavorites(_userId);
+    setState(() {
+      favorites = favList;
+    });
+  }
+
   Future<void> _logout() async {
     final prefs = await SharedPreferences.getInstance();
-    prefs.setBool('loggedIn', false);
-    prefs.remove('loggedInUser');
+    await prefs.remove('loggedInUserId');
+
     setState(() {
-      _isLoggedIn = false;
-      _loggedInUsername = "";
-      // Clear in-memory favorites so it won’t appear for the next user
-      favorites = List.generate(List_Item.length, (index) => false);
+      _userId = null;
+      favorites = [];
+      images = [];
     });
+
     await _navigateToLogin();
   }
 
-  List<bool> _generateFavorites(List<String> userFavorites) {
-    List<bool> result = List.generate(List_Item.length, (index) => false);
-    for (int i = 0; i < List_Item.length; i++) {
-      if (userFavorites.contains(List_Item[i]['pic'])) {
-        result[i] = true;
-      }
+  Future<void> _toggleFavorite(int imageId) async {
+    final db = DatabaseHelper.instance;
+    await db.toggleFavorite(_userId, imageId);
+    await _loadFavorites();
+  }
+
+  Future<void> _addNewImage() async {
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+
+    if (pickedFile != null) {
+      final db = DatabaseHelper.instance;
+
+      // Save the image path to the database
+      await db.insertImage(pickedFile.path);
+
+      // Refresh the gallery to show the new image
+      await _loadImages();
     }
-    return result;
   }
 
   void _onItemTapped(int index) {
-    if (index == 2) {
-      if (_isLoggedIn) {
+    if (index == 3) {
+      if (_userId != null) {
         _logout();
       } else {
         _navigateToLogin();
@@ -147,81 +159,56 @@ class _GalleryAppState extends State<GalleryApp> {
 
   @override
   Widget build(BuildContext context) {
-    // Build list of favorite items for Favorites page
-    List<Map<String, String>> favoriteItems = [];
-    for (int i = 0; i < List_Item.length; i++) {
-      if (favorites[i]) {
-        favoriteItems.add(List_Item[i]);
-      }
-    }
-
     return Scaffold(
+      backgroundColor: Colors.black,
       appBar: AppBar(
         centerTitle: true,
-        backgroundColor: Colors.black,
-
-        // Show "Login" if not logged in, otherwise "Gallery App"
-        title: Column(
-          children: <Widget>[
-            Text(
-              _isLoggedIn ? 'Gallery of: $_loggedInUsername' : 'Login',
-            ),
-          ],
-        ),
+        title: Text('Galeria'),
       ),
       body: _selectedIndex == 0
           ? GalleryPage(
-        items: List_Item,
+        userId: _userId,
+        images: images,
         favorites: favorites,
-        onFavoriteChanged: (index) async {
-          setState(() {
-            favorites[index] = !favorites[index];
-          });
-          final prefs = await SharedPreferences.getInstance();
-          List<String> userFavorites = [];
-          for (int i = 0; i < List_Item.length; i++) {
-            if (favorites[i]) {
-              userFavorites.add(List_Item[i]['pic']);
-            }
-          }
-          prefs.setStringList('favorites_' + _loggedInUsername, userFavorites);
+        onFavoriteChanged: (imageId) {
+          _toggleFavorite(imageId);
         },
       )
-          : FavoritesPage(
-        items: favoriteItems,
-        onFavoriteChanged: (index) async {
-          int originalIndex = List_Item.indexOf(favoriteItems[index]);
-          setState(() {
-            favorites[originalIndex] = !favorites[originalIndex];
-          });
-          final prefs = await SharedPreferences.getInstance();
-          List<String> userFavorites = [];
-          for (int i = 0; i < List_Item.length; i++) {
-            if (favorites[i]) {
-              userFavorites.add(List_Item[i]['pic']);
-            }
-          }
-          prefs.setStringList('favorites_' + _loggedInUsername, userFavorites);
+          : _selectedIndex == 1
+          ? FavoritesPage(
+        userId: _userId,
+        images: images.where((img) => favorites.contains(img['id'])).toList(),
+        onFavoriteChanged: (imageId) {
+          _toggleFavorite(imageId);
         },
-      ),
+      )
+          : _selectedIndex == 2
+          ? ProfilePage(userId: _userId)
+          : Container(),
+
+      floatingActionButton: _selectedIndex == 0
+          ? FloatingActionButton(
+        onPressed: _addNewImage,
+        backgroundColor: Colors.amber,
+        child: Icon(Icons.add, color: Colors.black),
+      )
+          : null,
+
       bottomNavigationBar: BottomNavigationBar(
         backgroundColor: Colors.black,
-        unselectedItemColor: Colors.white,
-        currentIndex: _selectedIndex,
         selectedItemColor: Colors.amber[800],
+        unselectedItemColor: Colors.white,
+        type: BottomNavigationBarType.fixed,
+        currentIndex: _selectedIndex,
         onTap: _onItemTapped,
-        items: <BottomNavigationBarItem>[
+        showUnselectedLabels: true,
+        items: [
+          BottomNavigationBarItem(icon: Icon(Icons.photo_library), label: 'Galeria'),
+          BottomNavigationBarItem(icon: Icon(Icons.favorite), label: 'Ulubione'),
+          BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profil'),
           BottomNavigationBarItem(
-            icon: Icon(Icons.photo_library),
-            label: 'Galeria',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.favorite),
-            label: 'Ulubione',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(_isLoggedIn ? Icons.logout : Icons.vpn_key),
-            label: _isLoggedIn ? 'Logout' : 'Login',
+            icon: Icon(_userId != null ? Icons.logout : Icons.login),
+            label: _userId != null ? 'Wyloguj' : 'Zaloguj',
           ),
         ],
       ),
